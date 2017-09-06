@@ -17,14 +17,6 @@ setwd("C:/Users/CA19130/Documents/Data/EL")
 ## WIDA files
 wida2017 = read_csv("K:/Assessment_Data Returns/ACCESS for ELs and ALT/2016-17/TN_Summative_Stud_File.csv")
 wida2016 = read_dta("K:/ORP_accountability/data/2016_WIDA_Access/wida_access_scores_2016_with_state_id.dta")
-ltel = read_csv("elb_20170901.csv", col_types = cols("i", "i", "c", "c", "c")) %>% 
-    filter(`English Language Background` %in% c("L", "W")) %>% 
-    group_by(`Student Key`) %>% 
-    mutate(first_lw = min(`School Year`, na.rm = T),
-           last_lw = max(`School Year`, na.rm = T),
-           ltel = last_lw - first_lw > 6) %>% 
-    summarize(ltel = max(ltel, na.rm = T)) %>% 
-    ungroup()
 
 ## Historical achievement
 h = read_dta("historical_elpa_crosswalked_student_level.dta") %>% 
@@ -93,7 +85,8 @@ f = wida2017 %>%
     left_join(select(growth_exp, score_band, growth_standard = score_60), by = "score_band") %>% 
     select(-score_band) 
 
-two_year_growth = select(filter(f, year == 2017), id, composite_pl2017 = composite_pl,
+# Calculate percentages of students meeting growth standard
+elpa = select(filter(f, year == 2017), id, composite_pl2017 = composite_pl,
                          growth_standard2017 = growth_standard) %>% 
     left_join(select(filter(f, year == 2016), id, composite_pl2016 = composite_pl,
                      growth_standard2016 = growth_standard), by = "id") %>% 
@@ -105,23 +98,33 @@ two_year_growth = select(filter(f, year == 2017), id, composite_pl2017 = composi
            growth_standard_2yr = growth_standard2015 + growth_standard2016,
            met_growth_1yr = growth_1yr >= growth_standard_1yr,
            met_growth_2yr = growth_2yr >= growth_standard_2yr,
-           met_growth_2yr_prev_standard = composite_pl2017 - composite_pl2015 >= 1.4) %>% 
-    left_join(ltel, by = c("id" = "Student Key")) %>% 
-    mutate(numerator = ifelse(ltel == 1, 1.5 * (met_growth_1yr == T | met_growth_2yr == T), 
-                              met_growth_1yr == T | met_growth_2yr == T),
+           met_growth_2yr_prev_standard = composite_pl2017 - composite_pl2015 >= 1.4,
+           numerator = met_growth_1yr == T | met_growth_2yr == T,
            denominator = !is.na(met_growth_1yr)) %>% 
-    left_join(transmute(wida2017, id = `State Student ID`, 
+    left_join(transmute(wida2017, id = `State Student ID`,
                         system = as.integer(str_replace(`District Number`, "TN", "")),
-                        school = as.integer(`School Number`)), 
-              by = "id")
-
-two_year_growth %>% 
+                        school = as.integer(`School Number`)),
+              by = "id") %>% 
     group_by(system) %>% 
     summarize(numerator = sum(numerator, na.rm = T),
               denominator = sum(denominator, na.rm = T),
               pct_met_growth = round(100 * sum(numerator, na.rm = T) /
                                          sum(denominator, na.rm = T), 1)) %>% 
-    ungroup() %>% 
+    ungroup() 
+
+# Calculate quintiles
+quantile(elpa$pct_met_growth[elpa$denominator >= 10], probs = seq(0, 1, 0.2))
+
+# Plot distributions
+elpa %>%  
     filter(denominator >= 10) %>% 
     ggplot(aes(pct_met_growth)) + 
-        geom_histogram()
+        geom_histogram() + 
+        geom_vline(xintercept = quantile(elpa$pct_met_growth[elpa$denominator >= 10], probs = seq(0, 1, 0.2))[1]) + 
+        geom_vline(xintercept = quantile(elpa$pct_met_growth[elpa$denominator >= 10], probs = seq(0, 1, 0.2))[2]) + 
+        geom_vline(xintercept = quantile(elpa$pct_met_growth[elpa$denominator >= 10], probs = seq(0, 1, 0.2))[3]) + 
+        geom_vline(xintercept = quantile(elpa$pct_met_growth[elpa$denominator >= 10], probs = seq(0, 1, 0.2))[4]) + 
+        geom_vline(xintercept = quantile(elpa$pct_met_growth[elpa$denominator >= 10], probs = seq(0, 1, 0.2))[5])
+
+# Output file
+write_csv(elpa, "K:/ORP_accountability/projects/Evan/EL/elpa_indicator.csv", na = "")
